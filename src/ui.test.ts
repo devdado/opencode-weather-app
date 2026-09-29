@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Readable, Writable } from "node:stream";
+import { ansiPaint } from "./colors.ts";
 import { cityLabel, formatUnit, parseChoice, Prompter, renderCityChoices, renderMenu, renderWeather } from "./ui.ts";
-import type { City, Config } from "./types.ts";
+import type { City, Config, Weather } from "./types.ts";
 
 const ottawa: City = {
   id: 6094817,
@@ -11,6 +12,36 @@ const ottawa: City = {
   latitude: 45.41117,
   longitude: -75.69812,
 };
+
+const weather: Weather = {
+  temperature: 16.3,
+  weatherCode: 0,
+  isDay: true,
+  observedAt: "2026-09-28T17:30",
+  timezone: "America/Toronto",
+  temperatureUnit: "°C",
+};
+
+const CLEARING: [number, number] = [22, 39];
+
+function stripAnsi(text: string): string {
+  return text.replaceAll(/\u001b\[\d+m/g, "");
+}
+
+function maxNesting(text: string): number {
+  let depth = 0;
+  let deepest = 0;
+  for (const match of text.matchAll(/\u001b\[(\d+)m/g)) {
+    const code = Number(match[1]);
+    if (CLEARING.includes(code)) {
+      depth = Math.max(0, depth - 1);
+    } else {
+      depth += 1;
+      deepest = Math.max(deepest, depth);
+    }
+  }
+  return deepest;
+}
 
 function config(overrides: Partial<Config> = {}): Config {
   return { version: 1, cities: [], defaultCityId: null, unit: "celsius", ...overrides };
@@ -104,15 +135,6 @@ describe("renderCityChoices", () => {
 });
 
 describe("renderWeather", () => {
-  const weather = {
-    temperature: 16.3,
-    weatherCode: 0,
-    isDay: true,
-    observedAt: "2026-09-28T17:30",
-    timezone: "America/Toronto",
-    temperatureUnit: "°C",
-  };
-
   test("shows city, temperature and condition", () => {
     const rendered = renderWeather(ottawa, weather);
     expect(rendered).toContain("Ottawa, Ontario, Canada");
@@ -163,5 +185,70 @@ describe("Prompter", () => {
     const prompter = new Prompter(Readable.from(["1\n"]) as unknown as NodeJS.ReadableStream, output.stream);
     prompter.close();
     expect(await prompter.ask("a: ")).toBeNull();
+  });
+});
+
+describe("colouring", () => {
+  const plain = {
+    menu: renderMenu(config({ cities: [ottawa] })),
+    choices: renderCityChoices([ottawa], ottawa.id),
+    weather: renderWeather(ottawa, weather),
+  };
+
+  const painted = {
+    menu: renderMenu(config({ cities: [ottawa] }), ansiPaint),
+    choices: renderCityChoices([ottawa], ottawa.id, ansiPaint),
+    weather: renderWeather(ottawa, weather, ansiPaint),
+  };
+
+  test("is off by default so piped output stays plain", () => {
+    expect(renderMenu(config())).not.toContain("\u001b");
+    expect(renderWeather(ottawa, weather)).not.toContain("\u001b");
+    expect(renderCityChoices([ottawa], null)).not.toContain("\u001b");
+  });
+
+  // Colouring must only insert escape codes: no character may be dropped,
+  // reordered, or counted differently, or the 40-column box stops lining up.
+  test("only inserts escape codes into the rendered text", () => {
+    expect(stripAnsi(painted.menu)).toBe(plain.menu);
+    expect(stripAnsi(painted.choices)).toBe(plain.choices);
+    expect(stripAnsi(painted.weather)).toBe(plain.weather);
+  });
+
+  test("emits escape codes when painting", () => {
+    expect(painted.menu).toContain("\u001b[");
+    expect(painted.choices).toContain("\u001b[");
+    expect(painted.weather).toContain("\u001b[");
+  });
+
+  // An inner close code also ends the outer span, so a nested paint would
+  // silently drop the outer colour for the rest of the line.
+  test("never nests a paint inside another", () => {
+    for (const rendered of Object.values(painted)) {
+      expect(maxNesting(rendered)).toBe(1);
+    }
+  });
+
+  test("closes every span it opens", () => {
+    for (const rendered of Object.values(painted)) {
+      const opens = [...rendered.matchAll(/\u001b\[(\d+)m/g)].filter((m) => !CLEARING.includes(Number(m[1])));
+      const closes = [...rendered.matchAll(/\u001b\[(\d+)m/g)].filter((m) => CLEARING.includes(Number(m[1])));
+      expect(opens.length).toBe(closes.length);
+    }
+  });
+
+  test("colours the temperature yellow and the default marker green", () => {
+    expect(painted.weather).toContain("\u001b[33m16.3 °C\u001b[39m");
+    expect(painted.choices).toContain("\u001b[32m (default)\u001b[39m");
+  });
+
+  test("colours the box rules, title and option labels cyan", () => {
+    const lines = painted.menu.split("\n");
+    expect(lines[0]).toBe(`\u001b[36m${"═".repeat(40)}\u001b[39m`);
+    expect(lines[1]).toBe("\u001b[36m         WEATHER CLI\u001b[39m");
+    expect(lines[2]).toBe(`\u001b[36m${"═".repeat(40)}\u001b[39m`);
+    for (const line of lines.slice(3, 10)) {
+      expect(line).toContain("\u001b[36m");
+    }
   });
 });

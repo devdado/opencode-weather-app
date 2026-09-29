@@ -1,5 +1,7 @@
 import { createInterface } from "node:readline";
 import type { Interface } from "node:readline";
+import { noColor } from "./colors.ts";
+import type { Paint } from "./colors.ts";
 import { describeWeather } from "./weather-codes.ts";
 import type { City, Config, Weather } from "./types.ts";
 
@@ -47,20 +49,20 @@ export function formatUnit(unit: Config["unit"]): string {
   return unit === "celsius" ? "°C" : "°F";
 }
 
-export function renderMenu(config: Config): string {
+export function renderMenu(config: Config, paint: Paint = noColor): string {
   const count = config.cities.length;
   return [
-    SEPARATOR,
-    "         WEATHER CLI",
-    SEPARATOR,
-    "  1. City weather (default)",
-    `  2. All cities weather (${count})`,
-    "  3. Search and add city",
-    "  4. Delete city",
-    "  5. Set default city",
-    `  6. Settings (${formatUnit(config.unit)})`,
-    "  7. Exit",
-    SEPARATOR,
+    paint("cyan", SEPARATOR),
+    paint("cyan", "         WEATHER CLI"),
+    paint("cyan", SEPARATOR),
+    `  1. ${paint("cyan", "City weather (default)")}`,
+    `  2. ${paint("cyan", "All cities weather")} (${count})`,
+    `  3. ${paint("cyan", "Search and add city")}`,
+    `  4. ${paint("cyan", "Delete city")}`,
+    `  5. ${paint("cyan", "Set default city")}`,
+    `  6. ${paint("cyan", "Settings")} (${formatUnit(config.unit)})`,
+    `  7. ${paint("cyan", "Exit")}`,
+    paint("cyan", SEPARATOR),
   ].join("\n");
 }
 
@@ -73,26 +75,26 @@ export function formatTemperature(weather: Weather): string {
   return `${weather.temperature} ${weather.temperatureUnit}`;
 }
 
-export function renderWeather(city: City, weather: Weather): string {
+export function renderWeather(city: City, weather: Weather, paint: Paint = noColor): string {
   const description = describeWeather(weather.weatherCode, weather.isDay);
   const lines = [
-    RULE,
-    `  ${description.emoji}  ${cityLabel(city)}`,
-    `      ${formatTemperature(weather)} · ${description.label}`,
+    paint("gray", RULE),
+    `  ${description.emoji}  ${paint("bold", cityLabel(city))}`,
+    `      ${paint("yellow", formatTemperature(weather))} · ${description.label}`,
   ];
   if (weather.observedAt.length > 0) {
     const local = weather.timezone.length > 0 ? ` · ${weather.timezone}` : "";
-    lines.push(`      Observed ${weather.observedAt}${local}`);
+    lines.push(`      ${paint("dim", `Observed ${weather.observedAt}${local}`)}`);
   }
-  lines.push(RULE);
+  lines.push(paint("gray", RULE));
   return lines.join("\n");
 }
 
-export function renderCityChoices(cities: City[], defaultCityId: number | null): string {
+export function renderCityChoices(cities: City[], defaultCityId: number | null, paint: Paint = noColor): string {
   return cities
     .map((city, index) => {
-      const marker = city.id === defaultCityId ? " (default)" : "";
-      return `  ${index + 1}. ${cityLabel(city)}${marker}`;
+      const marker = city.id === defaultCityId ? paint("green", " (default)") : "";
+      return `  ${paint("cyan", String(index + 1))}. ${cityLabel(city)}${marker}`;
     })
     .join("\n");
 }

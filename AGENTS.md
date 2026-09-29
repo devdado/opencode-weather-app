@@ -15,6 +15,7 @@ Currently a working CLI. `index.ts` is the entrypoint (referenced by `package.js
 | `src/openmeteo.ts` | API layer; `fetch` is injectable so tests never hit the network |
 | `src/config.ts` | `~/.weather-cli/config.json` load/save, with corrupt-file recovery |
 | `src/ui.ts` | Menu/weather rendering plus the `Prompter` (see below) |
+| `src/colors.ts` | ANSI palette; `makePaint` decides whether colour is on |
 | `src/weather-codes.ts` | WMO code → label + emoji map |
 | `src/types.ts` | `City`, `Config`, `Weather`, `TemperatureUnit` |
 
@@ -82,6 +83,33 @@ the `Prompter` back into something that looks more conventional:
   still lets the prompt be written *before* the read is awaited.
 - `src/ui.test.ts` guards this with a piped `Readable`; if you swap the prompt mechanism,
   that test is the one that will tell you.
+
+## Colours (`src/colors.ts`)
+
+Hand-rolled ANSI — there is no chalk/picocolors dependency and there should not be one. Two
+alternatives were measured and rejected on Bun 1.4.2:
+
+- `Bun.color` **rejects named colours**; it only accepts `[r,g,b]`-shaped formats and throws
+  on `Bun.color("cyan", "hi")`.
+- `node:util`'s `styleText` does work, but it gates on the global `process.stdout`. The app
+  writes to an *injected* `output` stream (`App`'s 4th constructor arg) and `makePaint` takes
+  the stream as a parameter, so `styleText` would colour a different stream than the one being
+  written to, and would be untestable without mutating `process.env`.
+
+Rules that the tests enforce, so don't break them:
+
+- **Never nest a paint inside another paint.** An inner close code also ends the outer span, so
+  `\e[36m…\e[31m…\e[39m…\e[39m` silently drops the cyan for the rest of the line. Paint the
+  smallest fragment that reads right. `src/ui.test.ts` walks the SGR stream and asserts the
+  nesting depth never exceeds 1.
+- **Colouring is additive: it only inserts escape codes.** `stripAnsi(fn(…, ansiPaint))` must
+  equal `fn(…)` byte for byte, or the 40-column box stops lining up. Centering and padding are
+  computed on the plain text, then painted.
+- **`paint` defaults to `noColor` in every render function and in `App`.** That is what keeps the
+  piped smoke test free of escape codes and makes the render assertions deterministic. The real
+  palette is constructed once in `index.ts` via `makePaint(process.stdout)`.
+- `makePaint` precedence: `FORCE_COLOR=0|false` → off, then non-empty `NO_COLOR` → off, then
+  non-empty `FORCE_COLOR` → on, else `stream.isTTY === true`.
 
 ## OpenMeteo
 

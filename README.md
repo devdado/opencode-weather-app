@@ -73,3 +73,24 @@ Saved cities, the default city, and the temperature unit live in
 `~/.weather-cli/config.json`. The file is created on first change and survives
 rebuilding or moving the binary. If it ever becomes unreadable, it is reset and
 the previous contents are kept alongside it as `config.json.corrupt`.
+
+### Colours
+
+Output is coloured when stdout is a terminal: the menu box and option labels are
+cyan, temperatures yellow, success messages green and errors red. When the output
+is piped or redirected it is plain text, so logs and CI output stay readable:
+
+```bash
+bun run index.ts | tee weather.log          # no escape codes
+```
+
+Two environment variables override the detection, following the `NO_COLOR`
+convention:
+
+| Variable | Effect |
+| --- | --- |
+| `NO_COLOR=1` | Never colour the output, even on a terminal. |
+| `FORCE_COLOR=1` | Always colour the output, even when piped. |
+
+`FORCE_COLOR=0` disables colour, and `NO_COLOR` takes precedence over any
+`FORCE_COLOR` value that would enable it.
