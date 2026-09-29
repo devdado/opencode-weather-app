@@ -19,7 +19,7 @@ The goal of this project is to create a console application that prompts the use
 2. Step 2: OpenMeteo API.
 
 ```
-https://geocoding-api.open-meteo.com/v1/search?name=Ottawa&count=1&language=es&format=json
+https://geocoding-api.open-meteo.com/v1/search?name=Ottawa&count=1&language=en&format=json
 https://api.open-meteo.com/v1/forecast?latitude=45.41117&longitude=-75.69812&current=temperature_2m
 ```
 
@@ -28,6 +28,25 @@ https://api.open-meteo.com/v1/forecast?latitude=45.41117&longitude=-75.69812&cur
 ```bash
 bun init
 ```
+
+## Commands
+
+```bash
+npm start          # run the app
+npm run dev        # run with hot reload
+npm run build      # typecheck, then compile to dist/weather
+bun test           # run the test suite
+```
+
+`npm run build` produces a self-contained executable at `dist/weather`. Run it from
+any terminal — it does not need Node, Bun, or a project checkout to be present:
+
+```bash
+./dist/weather
+```
+
+The binary is roughly 78 MB because it embeds the Bun runtime; that is expected and
+not something to optimise away. The output is Linux-only.
 
 ### Menu Example
 
@@ -42,8 +61,15 @@ This is the look we want to achieve:
   3. Search and add city
   4. Delete city
   5. Set default city
-  8. Settings (°C)
-  9. Exit
-════════════════════════════════════════
+  6. Settings (°C)
+  7. Exit
+═══════════════════════════════════════
   Select an option: 5
 ```
+
+### Where Settings Are Stored
+
+Saved cities, the default city, and the temperature unit live in
+`~/.weather-cli/config.json`. The file is created on first change and survives
+rebuilding or moving the binary. If it ever becomes unreadable, it is reset and
+the previous contents are kept alongside it as `config.json.corrupt`.
