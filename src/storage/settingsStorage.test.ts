@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configPath, defaultConfig, findDefaultCity, loadConfig, saveConfig } from "./config.ts";
-import type { Config } from "./types.ts";
+import { configPath, createSettingsStorage, defaultConfig, loadConfig, saveConfig } from "./settingsStorage.ts";
+import type { Config } from "../types/index.ts";
 
 let directory = "";
 let path = "";
@@ -47,7 +47,7 @@ describe("loadConfig", () => {
     await saveConfig(original, path);
     const { config } = await loadConfig(path);
     expect(config).toEqual(original);
-    expect(findDefaultCity(config)?.name).toBe("Ottawa");
+    expect(config.cities[0]?.name).toBe("Ottawa");
   });
 
   test("creates the parent directory on save", async () => {
@@ -103,12 +103,12 @@ describe("loadConfig", () => {
   });
 });
 
-describe("findDefaultCity", () => {
-  test("returns null when no default is set", () => {
-    expect(findDefaultCity(defaultConfig())).toBeNull();
-  });
+describe("createSettingsStorage", () => {
+  test("binds the path so callers never pass one", async () => {
+    const storage = createSettingsStorage(path);
 
-  test("returns the matching city", () => {
-    expect(findDefaultCity(sampleConfig())?.id).toBe(6094817);
+    expect((await storage.load()).config).toEqual(defaultConfig());
+    await storage.save(sampleConfig());
+    expect((await storage.load()).config).toEqual(sampleConfig());
   });
 });

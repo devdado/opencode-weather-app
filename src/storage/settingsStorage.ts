@@ -1,15 +1,15 @@
 import { mkdir, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { CONFIG_VERSION } from "./types.ts";
-import type { City, Config, TemperatureUnit } from "./types.ts";
+import type { City, Config, TemperatureUnit } from "../types/index.ts";
+import { CONFIG_DIR_NAME, CONFIG_FILE_NAME, CONFIG_VERSION } from "../utils/constants.ts";
 
 export function defaultConfig(): Config {
   return { version: CONFIG_VERSION, cities: [], defaultCityId: null, unit: "celsius" };
 }
 
 export function configPath(): string {
-  return join(homedir(), ".weather-cli", "config.json");
+  return join(homedir(), CONFIG_DIR_NAME, CONFIG_FILE_NAME);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -83,7 +83,15 @@ export async function saveConfig(config: Config, path: string = configPath()): P
   await rename(temporary, path);
 }
 
-export function findDefaultCity(config: Config): City | null {
-  if (config.defaultCityId === null) return null;
-  return config.cities.find((city) => city.id === config.defaultCityId) ?? null;
+/** The read/write pair the app depends on, with the path already bound. */
+export interface SettingsStorage {
+  load(): Promise<LoadResult>;
+  save(config: Config): Promise<void>;
+}
+
+export function createSettingsStorage(path: string = configPath()): SettingsStorage {
+  return {
+    load: () => loadConfig(path),
+    save: (config: Config) => saveConfig(config, path),
+  };
 }

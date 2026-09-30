@@ -81,7 +81,7 @@ cyan, temperatures yellow, success messages green and errors red. When the outpu
 is piped or redirected it is plain text, so logs and CI output stay readable:
 
 ```bash
-bun run index.ts | tee weather.log          # no escape codes
+bun run src/index.ts | tee weather.log          # no escape codes
 ```
 
 Two environment variables override the detection, following the `NO_COLOR`

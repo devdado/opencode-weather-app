@@ -5,30 +5,36 @@
 `02-weather` — a Bun + TypeScript console app that asks for a city and prints its weather.
 Two-step OpenMeteo flow (geocoding → forecast). End goal is a standalone compiled binary.
 `README.md` is the requirements spec (menu layout, feature list); treat it as authoritative over assumptions.
+`references/folder-structure.md` is the layout spec; follow it.
 
-Currently a working CLI. `index.ts` is the entrypoint (referenced by `package.json`
-`module`) and does nothing but wire things up — logic lives in `src/`:
+Currently a working CLI. `src/index.ts` is the entrypoint (referenced by `package.json`
+`module`) and does nothing but wire things up.
 
-| File | Role |
+## Layout
+
+Layered: `actions` sits on top, and it only talks to `presentation`, `storage` and `api`
+through the `AppContext`. Nothing below imports anything above it.
+
+| Path | Role |
 | --- | --- |
-| `src/app.ts` | Menu loop and the option 1–7 handlers |
-| `src/openmeteo.ts` | API layer; `fetch` is injectable so tests never hit the network |
-| `src/config.ts` | `~/.weather-cli/config.json` load/save, with corrupt-file recovery |
-| `src/ui.ts` | Menu/weather rendering plus the `Prompter` (see below) |
-| `src/colors.ts` | ANSI palette; `makePaint` decides whether colour is on |
-| `src/weather-codes.ts` | WMO code → label + emoji map |
-| `src/types.ts` | `City`, `Config`, `Weather`, `TemperatureUnit` |
+| `src/index.ts` | Entrypoint: paint, config load, SIGINT, build context, run |
+| `src/app.ts` | `runApp` menu loop and `createContext`; the only file not in the spec tree |
+| `src/actions/` | One file per menu option; `index.ts` holds `buildMenuOptions` |
+| `src/presentation/` | `menu.ts` render + choose, `output.ts` messages, `input.ts` `Prompter` + validators |
+| `src/storage/` | `settingsStorage.ts` owns the config file, `citiesStorage.ts` the city list |
+| `src/api/` | `geocoding.ts`, `weather.ts`, `http.ts` (`Fetcher`, `WeatherApiError`, `fetchJson`) |
+| `src/types/` | One type per file plus an `index.ts` barrel |
+| `src/utils/` | `format.ts`, `weatherCodes.ts`, `colors.ts`, `constants.ts` |
 
-No lint/format config. Keep `index.ts` runnable.
+`fetch` is injectable (`AppContext.fetcher`) so tests never hit the network. Adding a
+feature means one file in `actions/` and one row in `buildMenuOptions`.
 
 ## Commands
 
-There is **no `scripts` block in `package.json`** — `npm run dev` / `bun run test` do not exist. Use:
-
 | Task | Command |
 | --- | --- |
-| Run | `npm start` (= `bun run index.ts`) |
-| Watch | `npm run dev` (= `bun run index.ts --watch`) |
+| Run | `npm start` (= `bun run src/index.ts`) |
+| Watch | `npm run dev` (= `bun run src/index.ts --watch`) |
 | Build binary | `npm run build` → `dist/weather` |
 | Typecheck | `bunx tsc --noEmit` |
 | Test | `bun test` (Bun's built-in runner; needs no install) |
@@ -40,22 +46,22 @@ Notes:
 - Bun's test discovery glob is `**{.test,.spec,_test_,_spec_}.{js,ts,jsx,tsx}` — use `foo.test.ts`.
 - Don't add a linter/formatter unprompted — none is configured. `bunx biome`/`prettier` on request only.
 - The CLI reads stdin, so it smoke-tests without a TTY:
-  `printf '3\nOttawa\n1\n1\n7\n' | bun run index.ts`.
+  `printf '3\nOttawa\n1\n1\n7\n' | bun run src/index.ts`.
   Prefix with `HOME=/tmp/scratch` to keep the run out of the real `~/.weather-cli/config.json`.
 
 ## Building the binary (Bun 1.4.2)
 
-`npm run build` is `bunx tsc --noEmit && bun build --compile index.ts --outfile dist/weather`.
+`npm run build` is `bunx tsc --noEmit && bun build --compile src/index.ts --outfile dist/weather`.
 Three things that are not obvious, all measured rather than assumed:
 
 - **The `tsc` step is load-bearing.** `bun build --compile` does not typecheck — it happily
   compiled `const n: number = "definitely a string"` into a working binary. Don't drop the
   `&& bunx tsc --noEmit` half; nothing else will catch a type error before it ships.
 - **`--bytecode` does not work on this entrypoint.** It fails with `Expected "=>" but found ";"`
-  on `index.ts` because of top-level `await main()`. Rewriting to avoid TLA is not worth it:
+  on `src/index.ts` because of top-level `await main()`. Rewriting to avoid TLA is not worth it:
   measured startup was 5–7 ms either way, so bytecode bought nothing. Don't reach for it.
 - **`--minify` does not shrink the output** (78 MB with or without). The size is the embedded
-  Bun runtime, not our ~500 lines. Don't bother, and don't treat 78 MB as a regression.
+  Bun runtime, not our ~1500 lines. Don't bother, and don't treat 78 MB as a regression.
 
 `dist/` is already in `.gitignore`, so the artifact never shows up in `git status`.
 
@@ -71,8 +77,8 @@ Three things that are not obvious, all measured rather than assumed:
 
 ## Interactive input (Bun 1.4.2)
 
-Two Bun bugs shape `src/ui.ts`. Both were reproduced, not assumed — don't "simplify"
-the `Prompter` back into something that looks more conventional:
+Two Bun bugs shape `src/presentation/input.ts`. Both were reproduced, not assumed — don't
+"simplify" the `Prompter` back into something that looks more conventional:
 
 - `node:readline/promises` **throws** `TypeError: Attempted to assign to readonly property`
   when constructed with `Bun.stdin`. Only the callback `node:readline` works, and only
@@ -81,10 +87,24 @@ the `Prompter` back into something that looks more conventional:
   TTY — the second prompt in a loop just hangs. The fix is to pull from
   `rl[Symbol.asyncIterator]()` one line at a time, which works for both TTY and pipes and
   still lets the prompt be written *before* the read is awaited.
-- `src/ui.test.ts` guards this with a piped `Readable`; if you swap the prompt mechanism,
-  that test is the one that will tell you.
+- `src/presentation/input.test.ts` guards this with a piped `Readable`; if you swap the prompt
+  mechanism, that test is the one that will tell you.
 
-## Colours (`src/colors.ts`)
+## Output bytes
+
+`Output` (`src/presentation/output.ts`) owns every message shape, and the shape is a contract:
+the smoke-test transcripts and the rendered menu in `README.md` are byte-for-byte what the
+app prints. Two conventions are load-bearing, and they look like typos if you hit them:
+
+- `error()` and `note()` write their own trailing blank line; `inlineError()`, `success()` and
+  `loading()` do not. The caller adds `blank()` after the latter. `error` vs `inlineError` is
+  why a save failure is not followed by a blank line while a lookup failure is.
+- `weatherCard()` starts with its own leading newline so a card clears the prompt line.
+
+`src/app.test.ts` drives the whole loop with a piped `Readable` and a fake fetcher, so any
+change to those bytes fails there rather than in a manual smoke test.
+
+## Colours (`src/utils/colors.ts`)
 
 Hand-rolled ANSI — there is no chalk/picocolors dependency and there should not be one. Two
 alternatives were measured and rejected on Bun 1.4.2:
@@ -92,22 +112,22 @@ alternatives were measured and rejected on Bun 1.4.2:
 - `Bun.color` **rejects named colours**; it only accepts `[r,g,b]`-shaped formats and throws
   on `Bun.color("cyan", "hi")`.
 - `node:util`'s `styleText` does work, but it gates on the global `process.stdout`. The app
-  writes to an *injected* `output` stream (`App`'s 4th constructor arg) and `makePaint` takes
-  the stream as a parameter, so `styleText` would colour a different stream than the one being
-  written to, and would be untestable without mutating `process.env`.
+  writes to an *injected* `output` stream (`createOutput(process.stdout, …)`) and `makePaint`
+  takes the stream as a parameter, so `styleText` would colour a different stream than the one
+  being written to, and would be untestable without mutating `process.env`.
 
 Rules that the tests enforce, so don't break them:
 
 - **Never nest a paint inside another paint.** An inner close code also ends the outer span, so
   `\e[36m…\e[31m…\e[39m…\e[39m` silently drops the cyan for the rest of the line. Paint the
-  smallest fragment that reads right. `src/ui.test.ts` walks the SGR stream and asserts the
-  nesting depth never exceeds 1.
+  smallest fragment that reads right. `src/presentation/output.test.ts` and `menu.test.ts` walk
+  the SGR stream and assert the nesting depth never exceeds 1.
 - **Colouring is additive: it only inserts escape codes.** `stripAnsi(fn(…, ansiPaint))` must
   equal `fn(…)` byte for byte, or the 40-column box stops lining up. Centering and padding are
   computed on the plain text, then painted.
-- **`paint` defaults to `noColor` in every render function and in `App`.** That is what keeps the
-  piped smoke test free of escape codes and makes the render assertions deterministic. The real
-  palette is constructed once in `index.ts` via `makePaint(process.stdout)`.
+- **`paint` defaults to `noColor` in every render function and in `createContext`.** That is what
+  keeps the piped smoke test free of escape codes and makes the render assertions deterministic.
+  The real palette is constructed once in `src/index.ts` via `makePaint(process.stdout)`.
 - `makePaint` precedence: `FORCE_COLOR=0|false` → off, then non-empty `NO_COLOR` → off, then
   non-empty `FORCE_COLOR` → on, else `stream.isTTY === true`.
 
@@ -122,9 +142,11 @@ No API key, no `.env` — do not add auth or env plumbing. Endpoints are reachab
   (`{"generationtime_ms":0.92}`) — not `[]`. `json.results[0]` therefore throws, so the
   guard must be an `Array.isArray` presence check.
 - The API returns only *numeric* WMO weather codes; the label/emoji table is ours, and the
-  official code list is in `src/weather-codes.ts`.
+  official code list is in `src/utils/weatherCodes.ts`.
 - Unit conversion is server-side via `temperature_unit`. Don't convert on the client, and
   read the unit label back from `current_units.temperature_2m` rather than hardcoding.
 - API errors come back as `{"error": true, "reason": "..."}` with a non-2xx status.
+  `src/api/http.ts:fetchJson` normalises every failure mode into `WeatherApiError`; the menu
+  loop catches that type and keeps going, so don't throw anything else from an action.
 - Geocoding is `language=en` (the README used `language=es` originally); keep it in sync
   with the README.
